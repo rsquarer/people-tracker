@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="People" />
+  <title>People Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #0d0d18; }
+    body { -webkit-tap-highlight-color: transparent; }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(0.4); cursor: pointer; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    input, textarea, button, select { -webkit-appearance: none; font-family: inherit; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const STORAGE_KEY = "people-tracker-v1";
+
+const SCORE_LABELS = {
+  1: "😐 Meh", 2: "🙂 Okay", 3: "😊 Good", 4: "😄 Great", 5: "🌟 Amazing",
+};
+
+function calcAge(birthday, onDate) {
+  if (!birthday) return null;
+  const birth = new Date(birthday);
+  const ref = onDate ? new Date(onDate) : new Date();
+  let age = ref.getFullYear() - birth.getFullYear();
+  const m = ref.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && ref.getDate() < birth.getDate())) age--;
+  return age < 0 ? 0 : age;
+}
+
+function isBirthdayToday(birthday) {
+  if (!birthday) return false;
+  const today = new Date();
+  const birth = new Date(birthday);
+  return birth.getMonth() === today.getMonth() && birth.getDate() === today.getDate();
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+}
+
+function StarRating({ value, onChange }) {
+  const [hovered, setHovered] = useState(0);
+  return (
+    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+      {[1,2,3,4,5].map(s => (
+        <button key={s}
+          onClick={() => onChange(s === value ? 0 : s)}
+          onMouseEnter={() => setHovered(s)}
+          onMouseLeave={() => setHovered(0)}
+          style={{
+            background: "none", border: "none", cursor: "pointer", padding: 4,
+            fontSize: 22, transition: "transform 0.15s ease",
+            transform: hovered >= s || value >= s ? "scale(1.15)" : "scale(1)",
+            filter: hovered >= s ? "brightness(1.3)" : value >= s ? "brightness(1)" : "brightness(0.3)",
+          }}
+        >⭐</button>
+      ))}
+      {(hovered || value) ? (
+        <span style={{ fontSize: 11, color: "#a0a0b0", marginLeft: 4, fontFamily: "'DM Mono', monospace" }}>
+          {SCORE_LABELS[hovered || value]}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: "100%", marginTop: 6, padding: "12px 14px",
+  background: "rgba(255,255,255,0.05)",
+  border: "1px solid rgba(255,255,255,0.1)",
+  borderRadius: 12, color: "#f0f0f5",
+  fontSize: 15, fontFamily: "'DM Sans', sans-serif",
+  outline: "none", colorScheme: "dark",
+};
+
+function iconBtn(bg) {
+  return {
+    background: bg, border: "none", borderRadius: 8,
+    padding: "5px 9px", cursor: "pointer", fontSize: 14,
+    opacity: 0.85,
+  };
+}
+
+function PersonCard({ person, onEdit, onDelete, refDate }) {
+  const age = calcAge(person.birthday, refDate);
+  const isToday = isBirthdayToday(person.birthday);
+  const initials = person.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+  const hue = ((person.name.charCodeAt(0) || 0) * 47 + (person.name.charCodeAt(1) || 0) * 23) % 360;
+
+  return (
+    <div style={{
+      background: "linear-gradient(135deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.03) 100%)",
+      border: isToday ? "1px solid rgba(255,200,80,0.6)" : "1px solid rgba(255,255,255,0.1)",
+      borderRadius: 20, padding: "18px 20px",
+      backdropFilter: "blur(20px)",
+      boxShadow: isToday
+        ? "0 4px 30px rgba(255,200,80,0.15), inset 0 1px 0 rgba(255,255,255,0.08)"
+        : "0 4px 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06)",
+      animation: "slideIn 0.3s ease",
+    }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+        <div style={{
+          width: 46, height: 46, borderRadius: 14, flexShrink: 0,
+          background: `linear-gradient(135deg, hsl(${hue},65%,55%), hsl(${(hue+40)%360},65%,45%))`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 16, fontWeight: 700, color: "#fff",
+          fontFamily: "'DM Sans', sans-serif",
+          boxShadow: `0 2px 10px hsl(${hue},65%,45%,0.4)`,
+          position: "relative",
+        }}>
+          {initials}
+          {isToday && <div style={{ position: "absolute", top: -5, right: -5, fontSize: 14 }}>🎂</div>}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <h3 style={{
+              margin: 0, fontSize: 16, fontWeight: 600, color: "#f0f0f5",
+              fontFamily: "'DM Sans', sans-serif",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>
+              {person.name}
+              {isToday && <span style={{ marginLeft: 6, fontSize: 11, color: "#ffd060" }}>Birthday! 🎉</span>}
+            </h3>
+            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+              <button onClick={() => onEdit(person)} style={iconBtn("#2a2a3a")}>✏️</button>
+              <button onClick={() => onDelete(person.id)} style={iconBtn("#2a1a1a")}>🗑️</button>
+            </div>
+          </div>
+
+          {person.birthday && (
+            <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, color: "#8080a0", fontFamily: "'DM Mono', monospace" }}>
+                📅 {formatDate(person.birthday)}
+              </span>
+              {age !== null && (
+                <span style={{
+                  fontSize: 12, fontWeight: 600,
+                  background: "rgba(100,200,255,0.12)",
+                  border: "1px solid rgba(100,200,255,0.2)",
+                  color: "#80d0ff", padding: "1px 8px", borderRadius: 20,
+                  fontFamily: "'DM Mono', monospace",
+                }}>
+                  {age} yrs old
+                </span>
+              )}
+            </div>
+          )}
+
+          <div style={{ marginTop: 10 }}>
+            <StarRating value={person.score || 0} onChange={s => onEdit({ ...person, score: s, _save: true })} />
+          </div>
+
+          {person.notes && (
+            <p style={{
+              margin: "8px 0 0", fontSize: 12, color: "#6070a0",
+              fontFamily: "'DM Sans', sans-serif", lineHeight: 1.5,
+              borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: 8,
+            }}>
+              {person.notes}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Modal({ person, onSave, onClose }) {
+  const [form, setForm] = useState({
+    name: person?.name || "",
+    birthday: person?.birthday || "",
+    score: person?.score || 0,
+    notes: person?.notes || "",
+  });
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 100,
+      background: "rgba(0,0,0,0.75)", backdropFilter: "blur(10px)",
+      display: "flex", alignItems: "flex-end", justifyContent: "center",
+      animation: "fadeIn 0.2s ease",
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: "100%", maxWidth: 430,
+        background: "linear-gradient(180deg, #1e1e2e 0%, #16161f 100%)",
+        borderRadius: "28px 28px 0 0",
+        padding: "24px 24px env(safe-area-inset-bottom, 40px)",
+        boxShadow: "0 -20px 60px rgba(0,0,0,0.5)",
+        border: "1px solid rgba(255,255,255,0.1)",
+        animation: "slideUp 0.3s cubic-bezier(0.34,1.56,0.64,1)",
+      }}>
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.2)", margin: "0 auto 20px" }} />
+        <h2 style={{ margin: "0 0 20px", fontSize: 20, fontWeight: 700, color: "#f0f0f5", fontFamily: "'DM Sans', sans-serif" }}>
+          {person?.id ? "Edit Person" : "Add Person"}
+        </h2>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {[
+            { label: "Name *", key: "name", type: "text", placeholder: "Full name" },
+            { label: "Birthday", key: "birthday", type: "date" },
+          ].map(({ label, key, type, placeholder }) => (
+            <div key={key}>
+              <label style={{ fontSize: 11, color: "#6070a0", fontFamily: "'DM Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase" }}>{label}</label>
+              <input
+                type={type} value={form[key]} placeholder={placeholder}
+                onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                style={inputStyle}
+              />
+            </div>
+          ))}
+
+          <div>
+            <label style={{ fontSize: 11, color: "#6070a0", fontFamily: "'DM Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase", display: "block", marginBottom: 8 }}>Score</label>
+            <StarRating value={form.score} onChange={s => setForm(f => ({ ...f, score: s }))} />
+          </div>
+
+          <div>
+            <label style={{ fontSize: 11, color: "#6070a0", fontFamily: "'DM Mono', monospace", letterSpacing: "0.05em", textTransform: "uppercase" }}>Notes</label>
+            <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              placeholder="Any notes…" rows={2}
+              style={{ ...inputStyle, resize: "none", lineHeight: 1.5 }} />
+          </div>
+
+          <button
+            onClick={() => { if (!form.name.trim()) return; onSave({ ...person, ...form, name: form.name.trim() }); }}
+            style={{
+              marginTop: 6,
+              background: "linear-gradient(135deg, #4f8ef7, #7b5ff0)",
+              border: "none", borderRadius: 14, padding: "14px",
+              color: "#fff", fontSize: 16, fontWeight: 700,
+              fontFamily: "'DM Sans', sans-serif", cursor: "pointer",
+              boxShadow: "0 4px 20px rgba(79,142,247,0.4)",
+            }}
+          >
+            {person?.id ? "Save Changes" : "Add Person"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [people, setPeople] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
+  });
+  const [editing, setEditing] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [refDate, setRefDate] = useState("");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("name");
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(people)); } catch {}
+  }, [people]);
+
+  const savePerson = (p) => {
+    if (p._save) {
+      const { _save, ...clean } = p;
+      setPeople(prev => prev.map(x => x.id === clean.id ? clean : x));
+      return;
+    }
+    if (p.id) {
+      setPeople(prev => prev.map(x => x.id === p.id ? p : x));
+    } else {
+      setPeople(prev => [...prev, { ...p, id: Date.now().toString() }]);
+    }
+    setEditing(null);
+    setAdding(false);
+  };
+
+  const deletePerson = (id) => {
+    if (window.confirm("Remove this person?")) {
+      setPeople(prev => prev.filter(x => x.id !== id));
+    }
+  };
+
+  const handleEdit = (p) => {
+    if (p._save) { savePerson(p); return; }
+    setEditing(p);
+  };
+
+  const filtered = people
+    .filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      if (sortBy === "name") return a.name.localeCompare(b.name);
+      if (sortBy === "score") return (b.score || 0) - (a.score || 0);
+      if (sortBy === "age") return (calcAge(a.birthday, refDate) ?? 999) - (calcAge(b.birthday, refDate) ?? 999);
+      return 0;
+    });
+
+  const birthdays = people.filter(p => isBirthdayToday(p.birthday));
+
+  return (
+    <div style={{
+      minHeight: "100vh", minHeight: "100dvh",
+      background: "radial-gradient(ellipse 120% 80% at 50% -10%, rgba(79,142,247,0.12) 0%, transparent 60%), #0d0d18",
+      fontFamily: "'DM Sans', sans-serif",
+      display: "flex", justifyContent: "center",
+    }}>
+      <div style={{ width: "100%", maxWidth: 430, minHeight: "100dvh", position: "relative" }}>
+
+        {/* Sticky Header */}
+        <div style={{
+          padding: "calc(env(safe-area-inset-top, 20px) + 20px) 24px 16px",
+          position: "sticky", top: 0, zIndex: 50,
+          background: "rgba(13,13,24,0.92)", backdropFilter: "blur(20px)",
+          borderBottom: "1px solid rgba(255,255,255,0.04)",
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14 }}>
+            <div>
+              <h1 style={{
+                margin: 0, fontSize: 30, fontWeight: 700, letterSpacing: "-0.5px",
+                background: "linear-gradient(135deg, #f0f0f5 30%, #8090c0)",
+                WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+              }}>People</h1>
+              <p style={{ margin: "2px 0 0", fontSize: 12, color: "#4060a0", fontFamily: "'DM Mono', monospace" }}>
+                {people.length} {people.length === 1 ? "person" : "people"} tracked
+              </p>
+            </div>
+            <button onClick={() => setAdding(true)} style={{
+              background: "linear-gradient(135deg, #4f8ef7, #7b5ff0)",
+              border: "none", borderRadius: 14, padding: "10px 16px",
+              color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer",
+              boxShadow: "0 4px 15px rgba(79,142,247,0.35)",
+              fontFamily: "'DM Sans', sans-serif",
+            }}>+ Add</button>
+          </div>
+
+          <div style={{ position: "relative", marginBottom: 10 }}>
+            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14, opacity: 0.4 }}>🔍</span>
+            <input type="text" placeholder="Search people…" value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ ...inputStyle, paddingLeft: 36, marginTop: 0 }} />
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", background: "rgba(255,255,255,0.05)", borderRadius: 10, padding: 2, gap: 2 }}>
+              {["name","score","age"].map(s => (
+                <button key={s} onClick={() => setSortBy(s)} style={{
+                  background: sortBy === s ? "rgba(79,142,247,0.3)" : "none",
+                  border: sortBy === s ? "1px solid rgba(79,142,247,0.4)" : "1px solid transparent",
+                  borderRadius: 8, padding: "5px 10px", cursor: "pointer",
+                  color: sortBy === s ? "#80b0ff" : "#5060a0",
+                  fontSize: 11, fontFamily: "'DM Mono', monospace",
+                  textTransform: "uppercase", letterSpacing: "0.05em",
+                }}>{s}</button>
+              ))}
+            </div>
+            <div style={{ flex: 1, minWidth: 110 }}>
+              <input type="date" value={refDate} onChange={e => setRefDate(e.target.value)}
+                title="Check age on a specific date"
+                style={{ ...inputStyle, marginTop: 0, fontSize: 12, padding: "6px 10px" }} />
+            </div>
+            {refDate && (
+              <button onClick={() => setRefDate("")} style={{
+                background: "rgba(255,80,80,0.15)", border: "1px solid rgba(255,80,80,0.2)",
+                borderRadius: 8, padding: "6px 10px", cursor: "pointer",
+                color: "#ff8080", fontSize: 11, fontFamily: "'DM Mono', monospace",
+              }}>✕</button>
+            )}
+          </div>
+          {refDate && (
+            <p style={{ margin: "6px 0 0", fontSize: 11, color: "#4060a0", fontFamily: "'DM Mono', monospace" }}>
+              📅 Ages as of {formatDate(refDate)}
+            </p>
+          )}
+        </div>
+
+        {/* Birthday Banner */}
+        {birthdays.length > 0 && (
+          <div style={{
+            margin: "12px 24px 0",
+            padding: "12px 16px",
+            background: "linear-gradient(135deg, rgba(255,200,60,0.15), rgba(255,140,60,0.1))",
+            border: "1px solid rgba(255,200,60,0.3)",
+            borderRadius: 16, animation: "pulse 2s infinite",
+          }}>
+            <p style={{ margin: 0, fontSize: 13, color: "#ffd060", fontWeight: 600 }}>
+              🎂 {birthdays.map(p => p.name).join(", ")} {birthdays.length === 1 ? "has" : "have"} a birthday today!
+            </p>
+          </div>
+        )}
+
+        {/* List */}
+        <div style={{ padding: "16px 24px calc(env(safe-area-inset-bottom, 20px) + 80px)", display: "flex", flexDirection: "column", gap: 12 }}>
+          {filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "60px 20px" }}>
+              <div style={{ fontSize: 52, marginBottom: 16 }}>👥</div>
+              <p style={{ color: "#3040a0", fontSize: 15 }}>
+                {search ? "No people match your search." : "Tap + Add to get started."}
+              </p>
+            </div>
+          ) : (
+            filtered.map(person => (
+              <PersonCard key={person.id} person={person} onEdit={handleEdit} onDelete={deletePerson} refDate={refDate} />
+            ))
+          )}
+        </div>
+
+        {/* Bottom safe area */}
+        <div style={{
+          position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
+          width: "100%", maxWidth: 430,
+          background: "rgba(13,13,24,0.9)", backdropFilter: "blur(30px)",
+          borderTop: "1px solid rgba(255,255,255,0.05)",
+          padding: "10px 0 calc(env(safe-area-inset-bottom, 0px) + 10px)",
+          display: "flex", justifyContent: "center",
+        }}>
+          <div style={{ width: 36, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.12)" }} />
+        </div>
+      </div>
+
+      {(editing || adding) && (
+        <Modal person={editing} onSave={savePerson} onClose={() => { setEditing(null); setAdding(false); }} />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.render(<App />, document.getElementById("root"));
+</script>
+</body>
+</html>
